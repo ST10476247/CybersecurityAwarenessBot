@@ -85,6 +85,8 @@ namespace CyberBot
         /// </summary>
         private static string CleanInput(string raw)
         {
+            if (raw == null) return string.Empty;
+
             return raw
                 .Trim()
                 .ToLower()
@@ -249,3 +251,4 @@ namespace CyberBot
         }
     }
 }
+
