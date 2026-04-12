@@ -9,7 +9,7 @@ on:
 jobs:
   build:
     name: Build and Verify
-    runs-on: windows-latest
+    runs-on: windows-latest          # Required: System.Media only works on Windows
 
     steps:
       - name: Checkout repository
@@ -18,10 +18,21 @@ jobs:
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '8.0.x'    # dotnet CLI can build net48 on windows-latest
 
       - name: Restore NuGet packages
         run: dotnet restore CyberBot.csproj
 
       - name: Build (Release)
         run: dotnet build CyberBot.csproj --no-restore --configuration Release
+
+      - name: Confirm build artifact exists
+        run: |
+          if (Test-Path "bin/Release/net8.0-windows/CyberBot.exe") {
+            Write-Host "✅ CyberBot.exe built successfully."
+          } else {
+            Write-Error "❌ Build artifact not found!"
+            exit 1
+          }
+        shell: pwsh
+
