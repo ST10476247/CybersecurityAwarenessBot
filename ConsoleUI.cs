@@ -28,10 +28,19 @@ namespace CyberBot
         /// <summary>Clears the screen and sets a dark background.</summary>
         public static void Initialise()
         {
-            Console.OutputEncoding = System.Text.Encoding.UTF8;
-            Console.BackgroundColor = ConsoleColor.Black;
-            Console.Clear();
-            Console.CursorVisible = true;
+            try
+            {
+                Console.OutputEncoding = System.Text.Encoding.UTF8;
+                Console.BackgroundColor = ConsoleColor.Black;
+                Console.Clear();
+                Console.CursorVisible = true;
+            }
+            catch
+            {
+                // In some environments (like some CI/CD runners or limited terminals), 
+                // setting console properties or clearing can fail.
+                // We'll ignore these and just proceed with default console settings.
+            }
         }
 
         /// <summary>Prints the full ASCII banner in cyan.</summary>
@@ -176,3 +185,4 @@ namespace CyberBot
         }
     }
 }
+
