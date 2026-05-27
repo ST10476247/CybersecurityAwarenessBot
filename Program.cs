@@ -1,13 +1,17 @@
 using System;
+using System.Windows.Forms;
 
 namespace CyberBot
 {
-    class Program
+    static class Program
     {
-        static void Main(string[] args)
+        [STAThread]
+        static void Main()
         {
-            Bot bot = new Bot();
-            bot.Run();
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            Application.Run(new MainForm());
         }
     }
 }
+
