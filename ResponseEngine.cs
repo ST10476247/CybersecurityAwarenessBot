@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace CyberBot
 {
@@ -16,7 +17,8 @@ namespace CyberBot
         public int UnrecognisedCount { get; private set; }
 
         // ── Keyword → response map ─────────────────────────────────────────
-        private readonly Dictionary<string, Func<string, string>> _handlers;
+        private readonly Dictionary<string, Func<UserProfile, string, string>> _handlers;
+        private readonly Random _random = new Random();
 
         public ResponseEngine()
         {
@@ -41,32 +43,45 @@ namespace CyberBot
 
         /// <summary>
         /// Validates input and returns an appropriate response string.
-        /// Applies string manipulation to normalise the input before matching.
         /// </summary>
-        public string GetResponse(string rawInput)
+        public string GetResponse(string rawInput, UserProfile user)
         {
-            // ── Input validation ────────────────────────────────────────
             if (string.IsNullOrWhiteSpace(rawInput))
             {
-                return "I didn't quite understand that — it looks like you sent an empty message. " +
-                       "Could you rephrase?";
+                return "I didn't quite understand that — it looks like you sent an empty message. Could you rephrase?";
             }
 
             string input = CleanInput(rawInput);
 
-            if (input.Length < 2)
+            // ── Sentiment Detection ──────────────────────────────────────
+            string sentimentResponse = DetectSentiment(input, user);
+            if (!string.IsNullOrEmpty(sentimentResponse))
             {
-                return "That's a very short message! Could you give me a bit more detail?";
+                // If sentiment detected, we prepend it to the topic response if a topic is found
+                string topicResponse = FindTopicResponse(input, user);
+                if (!string.IsNullOrEmpty(topicResponse))
+                {
+                    return sentimentResponse + " " + topicResponse;
+                }
+                return sentimentResponse;
             }
 
-            // ── Keyword matching ─────────────────────────────────────────
-            foreach (KeyValuePair<string, Func<string, string>> handler in _handlers)
+            // ── Topic Matching ───────────────────────────────────────────
+            string response = FindTopicResponse(input, user);
+            if (!string.IsNullOrEmpty(response))
             {
-                if (input.Contains(handler.Key))
+                // Occasional personalization recall
+                if (_random.Next(10) < 2 && !string.IsNullOrEmpty(user.FavouriteTopic) && !response.Contains(user.FavouriteTopic))
                 {
-                    LastMatchedTopic = handler.Key;
-                    return handler.Value(input);
+                    response = $"As someone interested in {user.FavouriteTopic}, you might find this relevant: " + response;
                 }
+                return response;
+            }
+
+            // ── Conversation Flow (Follow-up) ────────────────────────────
+            if (IsFollowUpRequest(input))
+            {
+                return HandleFollowUp(user);
             }
 
             // ── Default fallback ─────────────────────────────────────────
@@ -79,175 +94,169 @@ namespace CyberBot
         // Private helpers
         // ─────────────────────────────────────────────────────────────────
 
-        /// <summary>
-        /// Normalises raw input: trims whitespace, lowercases, removes punctuation.
-        /// Demonstrates string manipulation.
-        /// </summary>
+        private string FindTopicResponse(string input, UserProfile user)
+        {
+            foreach (var handler in _handlers)
+            {
+                if (input.Contains(handler.Key))
+                {
+                    LastMatchedTopic = handler.Key;
+                    
+                    string prefix = "";
+                    // Memory: store interest
+                    if (IsCybersecurityTopic(handler.Key))
+                    {
+                        if (string.IsNullOrEmpty(user.FavouriteTopic) || user.FavouriteTopic != handler.Key)
+                        {
+                            user.FavouriteTopic = handler.Key;
+                            prefix = $"Great! I'll remember that you're interested in {handler.Key}. It's a crucial part of staying safe online. ";
+                        }
+                    }
+
+                    return prefix + handler.Value(user, input);
+                }
+            }
+            return null;
+        }
+
+        private bool IsCybersecurityTopic(string topic)
+        {
+            string[] topics = { "password", "phishing", "scam", "privacy", "malware", "2fa", "vpn", "social" };
+            return topics.Any(t => topic.Contains(t));
+        }
+
+        private bool IsFollowUpRequest(string input)
+        {
+            string[] followUps = { "more", "another", "explain", "tell me more", "give me another" };
+            return followUps.Any(f => input.Contains(f));
+        }
+
+        private string HandleFollowUp(UserProfile user)
+        {
+            if (string.IsNullOrEmpty(user.FavouriteTopic))
+            {
+                return "I'm not sure what you'd like to hear more about. Try asking about passwords, phishing, or privacy!";
+            }
+
+            // Return a more detailed tip or another tip for the last topic
+            return $"Sure! Since you're interested in {user.FavouriteTopic}, here's some more info: " + 
+                   GetRandomResponse(user.FavouriteTopic + "_extra") ?? $"I've told you quite a bit about {user.FavouriteTopic} already! What else can I help with?";
+        }
+
+        private string DetectSentiment(string input, UserProfile user)
+        {
+            if (input.Contains("worried") || input.Contains("scared") || input.Contains("afraid"))
+            {
+                return "It's completely understandable to feel worried. Cybersecurity can be complex, but I'm here to help you stay safe. Let's look at some simple steps you can take.";
+            }
+            if (input.Contains("curious") || input.Contains("interested") || input.Contains("learn"))
+            {
+                return "I love that curiosity! Staying informed is the best way to protect yourself online.";
+            }
+            if (input.Contains("frustrated") || input.Contains("annoyed") || input.Contains("hard"))
+            {
+                return "I hear you. Dealing with security settings can be frustrating sometimes. Let's try to break it down into easy steps.";
+            }
+            return null;
+        }
+
         private static string CleanInput(string raw)
         {
             if (raw == null) return string.Empty;
-
-            return raw
-                .Trim()
-                .ToLower()
-                .Replace("?", string.Empty)
-                .Replace("!", string.Empty)
-                .Replace(",", string.Empty)
-                .Replace(".", string.Empty);
+            return raw.Trim().ToLower()
+                .Replace("?", "").Replace("!", "").Replace(",", "").Replace(".", "");
         }
 
-        /// <summary>Builds the keyword-to-handler dictionary.</summary>
-        private static Dictionary<string, Func<string, string>> BuildHandlers()
+        private Dictionary<string, Func<UserProfile, string, string>> BuildHandlers()
         {
-            return new Dictionary<string, Func<string, string>>
+            return new Dictionary<string, Func<UserProfile, string, string>>
             {
-                // ── Conversational ───────────────────────────────────────
-                ["how are you"] = _ =>
-                    "I'm fully operational and threat-alert! 🛡️ " +
-                    "Thanks for asking. How can I help you stay safe online today?",
-
-                ["hello"]       = _ =>
-                    "Hello there! Great to see you. " +
-                    "Type 'topics' to see everything I can help you with.",
-
-                ["hi"]          = _ =>
-                    "Hey! 👋 I'm your Cybersecurity Awareness Bot. " +
-                    "Ask me about passwords, phishing, safe browsing, and more!",
-
-                ["thank"]       = _ =>
-                    "You're very welcome! Staying informed is the first step to staying secure. 😊",
-
-                // ── Bot purpose ──────────────────────────────────────────
-                ["purpose"]     = _ =>
-                    "My purpose is to educate and empower you with cybersecurity knowledge. 🎯\n" +
-                    "  I can help you understand threats like phishing and malware,\n" +
-                    "  give tips on strong passwords, safe browsing, and much more.\n" +
-                    "  Type 'topics' to see the full list!",
-
-                ["what can"]    = _ =>
-                    "Great question! Here are my areas of expertise:\n" +
-                    "  › Password safety    › Phishing awareness\n" +
-                    "  › Safe browsing      › Malware prevention\n" +
-                    "  › Two-factor auth    › VPN basics\n" +
-                    "  › Social media safety\n" +
-                    "  Just type any of these topics and I'll give you detailed tips!",
-
-                ["topics"]      = _ =>
-                    "TYPE ONE OF THESE TO LEARN MORE:\n" +
-                    "  password | phishing | browsing | malware | 2fa | vpn | social media",
-
-                // ── Cybersecurity topics ─────────────────────────────────
-                ["password"]    = _ =>
-                    "🔐 PASSWORD SAFETY TIPS:\n" +
-                    "  1. Use at least 12 characters — mix letters, numbers, and symbols.\n" +
-                    "  2. Never reuse passwords across different sites.\n" +
-                    "  3. Use a password manager (e.g. Bitwarden, 1Password) to store them safely.\n" +
-                    "  4. Avoid obvious info like your name or birthday.\n" +
-                    "  5. Change passwords immediately if a breach is detected.\n" +
-                    "  💡 Example of a strong password: T!gr3$-M0un7@in#42",
-
-                ["phishing"]    = _ =>
-                    "🎣 HOW TO SPOT PHISHING ATTACKS:\n" +
-                    "  1. Check the sender's email address carefully — look for misspellings.\n" +
-                    "  2. Hover over links before clicking to see the real URL.\n" +
-                    "  3. Be suspicious of urgent messages like 'Your account will be closed!'.\n" +
-                    "  4. Legitimate companies never ask for passwords via email.\n" +
-                    "  5. When in doubt, go directly to the website by typing the URL.\n" +
-                    "  ⚠️  If you suspect phishing, report it to your IT/security team.",
-
-                ["browsing"]    = _ =>
-                    "🌐 SAFE BROWSING HABITS:\n" +
-                    "  1. Always check for HTTPS (🔒) in the address bar.\n" +
-                    "  2. Keep your browser and extensions updated.\n" +
-                    "  3. Avoid public Wi-Fi for sensitive activities — use a VPN instead.\n" +
-                    "  4. Use an ad blocker to reduce malicious ad exposure.\n" +
-                    "  5. Disable browser autofill for passwords on shared computers.\n" +
-                    "  6. Clear your cache and cookies regularly.",
-
-                ["malware"]     = _ =>
-                    "🦠 MALWARE PREVENTION:\n" +
-                    "  1. Install reputable antivirus software and keep it updated.\n" +
-                    "  2. Never download software from untrusted sources.\n" +
-                    "  3. Don't open email attachments from unknown senders.\n" +
-                    "  4. Keep your OS and applications patched and up to date.\n" +
-                    "  5. Back up your data regularly to an offline or cloud location.\n" +
-                    "  ⚠️  Signs of infection: slow PC, unexpected pop-ups, crashes.",
-
-                ["virus"]       = _ =>
-                    "🦠 A virus is a type of malware that replicates itself to spread.\n" +
-                    "  Protection tips:\n" +
-                    "  › Use updated antivirus software.\n" +
-                    "  › Avoid pirated software and suspicious downloads.\n" +
-                    "  › Scan USB drives before opening files.",
-
-                ["2fa"]         = _ =>
-                    "🔑 TWO-FACTOR AUTHENTICATION (2FA):\n" +
-                    "  2FA adds a second layer of security beyond just a password.\n" +
-                    "  Even if your password is stolen, attackers can't log in without\n" +
-                    "  the second factor (a code from your phone or an app).\n" +
-                    "  Types of 2FA:\n" +
-                    "  › SMS code (convenient but least secure)\n" +
-                    "  › Authenticator app like Google Authenticator (recommended)\n" +
-                    "  › Hardware key like YubiKey (most secure)\n" +
-                    "  💡 Enable 2FA on every account that offers it!",
-
-                ["two factor"]  = _ =>
-                    "🔑 TWO-FACTOR AUTHENTICATION:\n" +
-                    "  This means you need TWO things to log in: your password plus a code.\n" +
-                    "  Use an authenticator app (Google Authenticator / Authy) for best security.\n" +
-                    "  Enable it on email, banking, and social media accounts first.",
-
-                ["vpn"]         = _ =>
-                    "🌍 VPN (Virtual Private Network):\n" +
-                    "  A VPN encrypts your internet traffic and hides your IP address.\n" +
-                    "  When to use a VPN:\n" +
-                    "  › On public Wi-Fi (coffee shops, airports)\n" +
-                    "  › When accessing work systems remotely\n" +
-                    "  › When you want privacy from your ISP\n" +
-                    "  Recommended VPNs: ProtonVPN, Mullvad, NordVPN\n" +
-                    "  ⚠️  Free VPNs often log and sell your data — avoid them!",
-
-                ["social"]      = _ =>
-                    "📱 SOCIAL MEDIA SAFETY:\n" +
-                    "  1. Review your privacy settings — limit who sees your posts.\n" +
-                    "  2. Never share personal details like your address or phone number publicly.\n" +
-                    "  3. Be cautious of friend requests from strangers.\n" +
-                    "  4. Don't click on links in DMs from people you don't know.\n" +
-                    "  5. Log out of social media on shared or public devices.\n" +
-                    "  6. Think before you post — once it's online, it can be permanent.",
-
-                ["ransomware"]  = _ =>
-                    "💰 RANSOMWARE:\n" +
-                    "  Ransomware encrypts your files and demands payment for the key.\n" +
-                    "  Prevention:\n" +
-                    "  › Back up files to an offline location regularly.\n" +
-                    "  › Don't open suspicious email attachments.\n" +
-                    "  › Keep software updated.\n" +
-                    "  ⚠️  If infected: disconnect from the internet immediately and contact IT.",
-
-                ["encryption"]  = _ =>
-                    "🔒 ENCRYPTION:\n" +
-                    "  Encryption scrambles data so only authorised parties can read it.\n" +
-                    "  Look for HTTPS, end-to-end encrypted messaging (Signal, WhatsApp),\n" +
-                    "  and encrypted storage for sensitive files.",
+                ["hello"] = (u, i) => $"Hello there, {u.Name}! How can I help you with cybersecurity today?",
+                ["hi"] = (u, i) => $"Hi {u.Name}! I'm your CyberBot. Ready to learn some safety tips?",
+                
+                ["password"] = (u, i) => {
+                    u.FavouriteTopic = "password";
+                    return GetRandomResponse("password");
+                },
+                ["phishing"] = (u, i) => {
+                    u.FavouriteTopic = "phishing";
+                    return GetRandomResponse("phishing");
+                },
+                ["scam"] = (u, i) => {
+                    u.FavouriteTopic = "scam";
+                    return GetRandomResponse("scam");
+                },
+                ["privacy"] = (u, i) => {
+                    u.FavouriteTopic = "privacy";
+                    return GetRandomResponse("privacy");
+                },
+                ["topics"] = (u, i) => "You can ask me about: passwords, phishing, scams, privacy, malware, 2FA, VPNs, and social media safety.",
+                
+                // Memory recall example
+                ["what do i like"] = (u, i) => !string.IsNullOrEmpty(u.FavouriteTopic) 
+                    ? $"You mentioned being interested in {u.FavouriteTopic} earlier! It's a great topic to focus on."
+                    : "I'm not sure yet! Tell me what cybersecurity topics interest you.",
+                
+                ["my name"] = (u, i) => $"Your name is {u.Name}! I'll remember that throughout our chat."
             };
         }
 
-        /// <summary>Builds a contextual fallback response.</summary>
+        private string GetRandomResponse(string category)
+        {
+            var responses = new Dictionary<string, string[]>()
+            {
+                ["password"] = new[] {
+                    "Make sure to use strong, unique passwords for each account. Avoid using personal details like birthdays.",
+                    "A strong password should be at least 12 characters long and include a mix of symbols, numbers, and letters.",
+                    "Using a password manager is a great way to keep track of complex passwords without having to remember them all."
+                },
+                ["phishing"] = new[] {
+                    "Be cautious of emails asking for personal information. Scammers often disguise themselves as trusted organisations.",
+                    "Always hover over links in emails to see the actual destination URL before clicking.",
+                    "If an email feels urgent or creates a sense of panic, it might be a phishing attempt. Take a breath and verify the sender."
+                },
+                ["scam"] = new[] {
+                    "If an offer online sounds too good to be true, it's probably a scam. Always verify the source.",
+                    "Never share your banking details or OTPs with anyone over the phone or via email.",
+                    "Scammers often use 'urgent' requests to pressure you. Take your time and think before you act."
+                },
+                ["privacy"] = new[] {
+                    "Review your social media privacy settings regularly to control who can see your personal information.",
+                    "Be careful about what apps you give permission to access your location or contacts.",
+                    "Privacy is about more than just passwords; it's about being mindful of what you share online."
+                },
+                ["password_extra"] = new[] {
+                    "You should also enable Two-Factor Authentication (2FA) for an extra layer of security.",
+                    "Consider using 'passphrases' — long strings of random words — which are easier for humans to remember but hard for computers to crack."
+                },
+                ["phishing_extra"] = new[] {
+                    "Check for grammatical errors or generic greetings like 'Dear Customer' as these are common red flags.",
+                    "Remember that legitimate companies will never ask for your password via email."
+                },
+                ["scam_extra"] = new[] {
+                    "Always look for the 'https' and the padlock icon in your browser when entering sensitive information.",
+                    "If you're unsure about a website, search for reviews or reports of scams associated with it."
+                },
+                ["privacy_extra"] = new[] {
+                    "Using a VPN can help hide your IP address and keep your browsing activity private from your ISP.",
+                    "Consider using a privacy-focused browser or search engine to reduce tracking."
+                }
+            };
+
+            if (responses.ContainsKey(category))
+            {
+                var list = responses[category];
+                return list[_random.Next(list.Length)];
+            }
+            return null;
+        }
+
         private string BuildFallbackResponse(string originalInput)
         {
-            // String manipulation: extract first word from original input
             string[] words = originalInput.Trim().Split(' ');
             string firstWord = words.Length > 0 ? words[0] : "that";
 
-            if (UnrecognisedCount >= 3)
-            {
-                return $"I'm still not sure what you mean by '{firstWord}'. " +
-                       "Try typing 'topics' to see the full list of subjects I can help with.";
-            }
-
-            return $"I didn't quite understand '{firstWord}'. Could you rephrase? " +
-                   "You can also type 'topics' to see what I know about.";
+            return $"I'm not sure I understand what you mean by '{firstWord}'. Can you try rephrasing? You can also type 'topics' to see what I can help with.";
         }
     }
 }
