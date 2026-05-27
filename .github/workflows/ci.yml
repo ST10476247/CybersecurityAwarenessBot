@@ -24,14 +24,29 @@ jobs:
         run: dotnet restore CyberBot.csproj
 
       - name: Build (Release)
-        run: dotnet build CyberBot.csproj --no-restore --configuration Release
+        run: |
+          dotnet build CyberBot.csproj --configuration Release
+          Write-Host "Build finished. Checking bin directory..."
+          Get-ChildItem -Path bin -Recurse | Select-Object FullName
 
       - name: Confirm build artifact exists
         run: |
-          if (Test-Path "bin/Release/net8.0-windows/CyberBot.exe") {
-            Write-Host "✅ CyberBot.exe built successfully."
+          # We check net8.0-windows specifically
+          $targetPath = "bin/Release/net8.0-windows"
+          if (Test-Path $targetPath) {
+            $exePath = Join-Path $targetPath "CyberBot.exe"
+            $dllPath = Join-Path $targetPath "CyberBot.dll"
+            
+            if (Test-Path $exePath) {
+              Write-Host "✅ CyberBot.exe found at $exePath"
+            } elseif (Test-Path $dllPath) {
+              Write-Host "✅ CyberBot.dll found at $dllPath"
+            } else {
+              Write-Error "❌ Could not find CyberBot.exe or CyberBot.dll in $targetPath"
+              exit 1
+            }
           } else {
-            Write-Error "❌ Build artifact not found!"
+            Write-Error "❌ Target directory $targetPath does not exist."
             exit 1
           }
         shell: pwsh
