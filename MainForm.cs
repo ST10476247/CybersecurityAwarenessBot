@@ -104,7 +104,7 @@ namespace CyberBot
             // Periodic tips
             if (_user.QuestionCount > 0 && _user.QuestionCount % 5 == 0)
             {
-                AppendBotMessage($" You've asked {_user.QuestionCount} questions, {_user.Name}! Knowledge is your best defence.");
+                AppendBotMessage($"🏆 You've asked {_user.QuestionCount} questions, {_user.Name}! Knowledge is your best defence.");
             }
         }
 
@@ -142,3 +142,4 @@ namespace CyberBot
         }
     }
 }
+
