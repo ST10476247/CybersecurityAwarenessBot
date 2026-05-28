@@ -39,7 +39,7 @@ namespace CyberBot
             catch (Exception ex)
             {
                 // Audio failure should never crash the bot; just skip playback
-                ConsoleUI.PrintInfo($"Audio unavailable: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"Audio unavailable: {ex.Message}");
             }
         }
 
